@@ -1,7 +1,22 @@
 import { useState } from "react";
 import server from "./server";
+import { utf8ToBytes, toHex } from "ethereum-cryptography/utils";
+import { keccak256 } from "ethereum-cryptography/keccak";
+import * as secp from "ethereum-cryptography/secp256k1";
 
-function Transfer({ address, setBalance }) {
+function hashTransaction(transaction) {
+  return hashMessage(JSON.stringify(transaction));
+}
+
+function hashMessage(message) {
+  return keccak256(utf8ToBytes(message));
+}
+
+async function signTransaction(transactionHash, privateKey) {
+  return secp.sign(transactionHash, privateKey, { recovered: true });
+}
+
+function Transfer({ address, setBalance, privateKey, nounce, setNounce }) {
   const [sendAmount, setSendAmount] = useState("");
   const [recipient, setRecipient] = useState("");
 
@@ -11,14 +26,25 @@ function Transfer({ address, setBalance }) {
     evt.preventDefault();
 
     try {
-      const {
-        data: { balance },
-      } = await server.post(`send`, {
+      const transaction = {
         sender: address,
         amount: parseInt(sendAmount),
         recipient,
-      });
+        nounce: nounce + 1
+      };
+
+      const hash = hashTransaction(transaction)
+      transaction.transactionHash = toHex(hash)
+      const [signature, recoveryBit] = await signTransaction(transaction.transactionHash, privateKey)
+
+      transaction.signature = toHex(signature)
+      transaction.recoveryBit = recoveryBit
+
+      const {
+        data: { balance },
+      } = await server.post(`send`, transaction);
       setBalance(balance);
+      setNounce(nounce + 1)
     } catch (ex) {
       alert(ex.response.data.message);
     }
